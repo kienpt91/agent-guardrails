@@ -9,11 +9,15 @@ import {
   HttpCallbackApprovalGate,
   InMemoryApprovalGate,
   ManualClock,
+  DIGEST_HEADER,
   SIGNATURE_HEADER,
+  TIMESTAMP_HEADER,
   approvalIdFor,
+  callDigest,
   createCallbackServer,
   effectiveStatus,
   sign,
+  signDecision,
   type ApprovalRequest,
   type ApprovalStore,
 } from "../src/index.js";
@@ -27,6 +31,7 @@ function request(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
     toolCallId: "call_1",
     tool: "send_message",
     sideEffect: "external-send",
+    digest: callDigest("run_1", "call_1", "send_message", { to: ["a@x.example"] }),
     args: { to: ["a@x.example"] },
     summary: "Send a message",
     reasons: ["approve-send"],
@@ -54,17 +59,17 @@ describe("approvalIdFor", () => {
 describe("effectiveStatus", () => {
   it("turns a pending request past its expiry into expired", () => {
     const req = request({ expiresAt: 2000 });
-    expect(effectiveStatus(req, { status: "pending" }, 1999).status).toBe("pending");
-    expect(effectiveStatus(req, { status: "pending" }, 2000).status).toBe("expired");
+    expect(effectiveStatus(req, { status: "pending", requestDigest: req.digest }, 1999).status).toBe("pending");
+    expect(effectiveStatus(req, { status: "pending", requestDigest: req.digest }, 2000).status).toBe("expired");
   });
 
   it("never overrides a recorded decision", () => {
     const req = request({ expiresAt: 2000 });
-    expect(effectiveStatus(req, { status: "approved", decidedBy: "x" }, 9999).status).toBe("approved");
+    expect(effectiveStatus(req, { status: "approved", requestDigest: req.digest, decidedBy: "x" }, 9999).status).toBe("approved");
   });
 
   it("never expires a request without a timeout", () => {
-    expect(effectiveStatus(request(), { status: "pending" }, 1e12).status).toBe("pending");
+    expect(effectiveStatus(request(), { status: "pending", requestDigest: request().digest }, 1e12).status).toBe("pending");
   });
 });
 
@@ -77,7 +82,7 @@ describe.each(stores)("%s approval store", (_name, make) => {
   it("starts pending and records an approval with who decided it", async () => {
     const store = make();
     await store.request(request());
-    expect(await store.status(request().id)).toEqual({ status: "pending" });
+    expect(await store.status(request().id)).toEqual({ status: "pending", requestDigest: request().digest });
     const decision = await store.decide(request().id, "approved", "reviewer", "looks fine");
     expect(decision).toMatchObject({ status: "approved", decidedBy: "reviewer", reason: "looks fine", decidedAt: 1500 });
     expect(await store.status(request().id)).toMatchObject({ status: "approved" });
@@ -165,8 +170,10 @@ describe("FileApprovalGate persistence", () => {
 });
 
 describe("HttpCallbackApprovalGate", () => {
+  const clock = new ManualClock({ start: 1_000_000 });
+
   function setup(fetchImpl?: typeof fetch) {
-    const store = new FileApprovalGate(join(dir, "http"), new ManualClock({ start: 1500 }));
+    const store = new FileApprovalGate(join(dir, "http"), clock);
     const calls: { url: string; init: RequestInit }[] = [];
     const fakeFetch: typeof fetch =
       fetchImpl ??
@@ -180,20 +187,31 @@ describe("HttpCallbackApprovalGate", () => {
       secret: SECRET,
       callbackBaseUrl: "https://agent.example/",
       fetch: fakeFetch,
+      clock,
     });
     return { store, gate, calls };
   }
 
-  it("persists the request and POSTs a signed notification with a callback URL", async () => {
+  /** Auth a reviewer's system would send for `body`, for a given approval digest and timestamp. */
+  const authFor = (id: string, body: string, overrides: { digest?: string; timestamp?: number; secret?: string } = {}) => {
+    const digest = overrides.digest ?? request().digest;
+    const timestamp = overrides.timestamp ?? clock.now();
+    return { signature: signDecision(overrides.secret ?? SECRET, { id, digest, timestamp, body }), timestamp: String(timestamp), digest };
+  };
+  const approve = JSON.stringify({ decision: "approved", decidedBy: "alice@corp.example", reason: "ok" });
+
+  it("persists the request and POSTs a signed, timestamped notification with a callback URL and the digest", async () => {
     const { store, gate, calls } = setup();
     const outcome = await gate.request(request());
     expect(outcome).toMatchObject({ notified: true });
     expect(calls).toHaveLength(1);
     const body = String(calls[0]!.init.body);
-    expect((calls[0]!.init.headers as Record<string, string>)[SIGNATURE_HEADER]).toBe(sign(SECRET, body));
+    const headers = calls[0]!.init.headers as Record<string, string>;
+    expect(headers[TIMESTAMP_HEADER]).toBe(String(clock.now()));
+    expect(headers[SIGNATURE_HEADER]).toBe(sign(SECRET, `${headers[TIMESTAMP_HEADER]}.${body}`));
     expect(JSON.parse(body)).toMatchObject({
       type: "approval.requested",
-      request: { id: request().id },
+      request: { id: request().id, digest: request().digest },
       callbackUrl: `https://agent.example/approvals/${request().id}`,
     });
     expect((await store.status(request().id)).status).toBe("pending");
@@ -215,11 +233,10 @@ describe("HttpCallbackApprovalGate", () => {
     expect(() => new HttpCallbackApprovalGate({ store: new InMemoryApprovalGate(), notifyUrl: "https://x", secret: "short" })).toThrow(/16 characters/);
   });
 
-  it("records a decision from a correctly signed callback", async () => {
+  it("records a decision from a correctly signed, fresh callback", async () => {
     const { gate } = setup();
     await gate.request(request());
-    const body = JSON.stringify({ decision: "approved", decidedBy: "alice@corp.example", reason: "ok" });
-    const res = await gate.handleCallback(request().id, body, sign(SECRET, `${request().id}.${body}`));
+    const res = await gate.handleCallback(request().id, approve, authFor(request().id, approve));
     expect(res).toEqual({ status: 200, body: { id: request().id, status: "approved" } });
     expect(await gate.status(request().id)).toMatchObject({ status: "approved", decidedBy: "alice@corp.example" });
   });
@@ -227,18 +244,65 @@ describe("HttpCallbackApprovalGate", () => {
   it("rejects missing, wrong or cross-request signatures without changing state", async () => {
     const { gate } = setup();
     await gate.request(request());
-    const body = JSON.stringify({ decision: "approved", decidedBy: "mallory" });
-    expect((await gate.handleCallback(request().id, body, undefined)).status).toBe(401);
-    expect((await gate.handleCallback(request().id, body, "sha256=00")).status).toBe(401);
-    expect((await gate.handleCallback(request().id, body, sign("another-secret-value-1234", `${request().id}.${body}`))).status).toBe(401);
-    expect((await gate.handleCallback(request().id, body, sign(SECRET, `apr_other.${body}`))).status).toBe(401);
+    const good = authFor(request().id, approve);
+    expect((await gate.handleCallback(request().id, approve, { ...good, signature: undefined })).status).toBe(401);
+    expect((await gate.handleCallback(request().id, approve, { ...good, timestamp: undefined })).status).toBe(401);
+    expect((await gate.handleCallback(request().id, approve, { ...good, digest: undefined })).status).toBe(401);
+    expect((await gate.handleCallback(request().id, approve, { ...good, signature: "sha256=00" })).status).toBe(401);
+    expect((await gate.handleCallback(request().id, approve, authFor(request().id, approve, { secret: "another-secret-value-1234" }))).status).toBe(401);
+    expect((await gate.handleCallback(request().id, approve, authFor("apr_other", approve))).status).toBe(401);
+    expect((await gate.handleCallback(request().id, `${approve} `, good)).status).toBe(401);
     expect((await gate.status(request().id)).status).toBe("pending");
+  });
+
+  it("a signature does not cover a different digest or timestamp than the one it was made for", async () => {
+    const { gate } = setup();
+    await gate.request(request());
+    const good = authFor(request().id, approve);
+    expect((await gate.handleCallback(request().id, approve, { ...good, digest: "0".repeat(64) })).status).toBe(401);
+    expect((await gate.handleCallback(request().id, approve, { ...good, timestamp: String(clock.now() + 1) })).status).toBe(401);
+  });
+
+  it("rejects stale and future-dated decisions outside the freshness window", async () => {
+    const { gate } = setup();
+    await gate.request(request());
+    const old = authFor(request().id, approve, { timestamp: clock.now() - 5 * 60_000 - 1 });
+    expect(await gate.handleCallback(request().id, approve, old)).toMatchObject({ status: 401, body: { error: expect.stringContaining("freshness") } });
+    const future = authFor(request().id, approve, { timestamp: clock.now() + 5 * 60_000 + 1 });
+    expect((await gate.handleCallback(request().id, approve, future)).status).toBe(401);
+    const edge = authFor(request().id, approve, { timestamp: clock.now() - 5 * 60_000 });
+    expect((await gate.handleCallback(request().id, approve, edge)).status).toBe(200);
+  });
+
+  it("a captured callback cannot be replayed: the request can be decided once", async () => {
+    const { gate } = setup();
+    await gate.request(request());
+    const auth = authFor(request().id, approve);
+    expect((await gate.handleCallback(request().id, approve, auth)).status).toBe(200);
+    const replay = await gate.handleCallback(request().id, approve, auth);
+    expect(replay.status).toBe(409);
+  });
+
+  it("a captured approval for an old call cannot approve a later request that reuses the id", async () => {
+    const { gate } = setup();
+    await gate.request(request());
+    const captured = authFor(request().id, approve);
+    // Same run and call id, different arguments: the file store replaces the stale record with a fresh pending one.
+    const changed = request({ digest: callDigest("run_1", "call_1", "send_message", { to: ["attacker@evil.example"] }) });
+    await gate.request(changed);
+    expect((await gate.status(request().id)).status).toBe("pending");
+    const replay = await gate.handleCallback(request().id, approve, captured);
+    expect(replay.status).toBe(409);
+    expect(replay.body["error"]).toContain("different call");
+    expect((await gate.status(request().id)).status).toBe("pending");
+    const fresh = authFor(request().id, approve, { digest: changed.digest });
+    expect((await gate.handleCallback(request().id, approve, fresh)).status).toBe(200);
   });
 
   it("rejects malformed bodies", async () => {
     const { gate } = setup();
     await gate.request(request());
-    const send = (body: string) => gate.handleCallback(request().id, body, sign(SECRET, `${request().id}.${body}`));
+    const send = (body: string) => gate.handleCallback(request().id, body, authFor(request().id, body));
     expect((await send("not json")).status).toBe(400);
     expect((await send(JSON.stringify({ decision: "maybe", decidedBy: "x" }))).status).toBe(400);
     expect((await send(JSON.stringify({ decision: "approved" }))).status).toBe(400);
@@ -248,10 +312,9 @@ describe("HttpCallbackApprovalGate", () => {
     const { gate } = setup();
     await gate.request(request());
     const body = JSON.stringify({ decision: "denied", decidedBy: "bob" });
-    const sig = (id: string) => sign(SECRET, `${id}.${body}`);
-    expect((await gate.handleCallback("apr_unknown", body, sig("apr_unknown"))).status).toBe(404);
-    expect((await gate.handleCallback(request().id, body, sig(request().id))).status).toBe(200);
-    expect((await gate.handleCallback(request().id, body, sig(request().id))).status).toBe(409);
+    expect((await gate.handleCallback("apr_unknown", body, authFor("apr_unknown", body))).status).toBe(404);
+    expect((await gate.handleCallback(request().id, body, authFor(request().id, body))).status).toBe(200);
+    expect((await gate.handleCallback(request().id, body, authFor(request().id, body))).status).toBe(409);
   });
 
   it("round-trips over a real loopback HTTP server", async () => {
@@ -263,14 +326,19 @@ describe("HttpCallbackApprovalGate", () => {
       const { port } = server.address() as AddressInfo;
       const url = `http://127.0.0.1:${port}/approvals/${request().id}`;
       const body = JSON.stringify({ decision: "approved", decidedBy: "carol" });
-      const bad = await fetch(url, { method: "POST", body, headers: { [SIGNATURE_HEADER]: "sha256=bad" } });
+      const auth = authFor(request().id, body);
+      const headers = { [SIGNATURE_HEADER]: auth.signature, [TIMESTAMP_HEADER]: auth.timestamp, [DIGEST_HEADER]: auth.digest };
+      const bad = await fetch(url, { method: "POST", body, headers: { ...headers, [SIGNATURE_HEADER]: "sha256=bad" } });
       expect(bad.status).toBe(401);
-      const ok = await fetch(url, { method: "POST", body, headers: { [SIGNATURE_HEADER]: sign(SECRET, `${request().id}.${body}`) } });
+      const missing = await fetch(url, { method: "POST", body, headers: { [SIGNATURE_HEADER]: auth.signature } });
+      expect(missing.status).toBe(401);
+      const ok = await fetch(url, { method: "POST", body, headers });
       expect(ok.status).toBe(200);
       expect(await ok.json()).toEqual({ id: request().id, status: "approved" });
+      expect((await fetch(url, { method: "POST", body, headers })).status).toBe(409);
       expect((await fetch(`http://127.0.0.1:${port}/other`, { method: "POST", body })).status).toBe(404);
       expect((await fetch(url, { method: "GET" })).status).toBe(404);
-      const huge = await fetch(url, { method: "POST", body: "x".repeat(20_000), headers: { [SIGNATURE_HEADER]: "sha256=bad" } });
+      const huge = await fetch(url, { method: "POST", body: "x".repeat(20_000), headers });
       expect(huge.status).toBe(413);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

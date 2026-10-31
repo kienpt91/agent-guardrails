@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli } from "../src/cli.js";
-import { FileApprovalGate, approvalIdFor, type ApprovalRequest } from "../src/index.js";
+import { FileApprovalGate, approvalIdFor, callDigest, type ApprovalRequest } from "../src/index.js";
 import { runExample } from "../examples/marketing-ops/run.js";
 import { POLICY_PATH } from "../examples/marketing-ops/agent.js";
 
@@ -26,6 +26,7 @@ const request = (): ApprovalRequest => ({
   toolCallId: "call_1",
   tool: "crm_send_email",
   sideEffect: "external-send",
+  digest: callDigest("run_1", "call_1", "crm_send_email", {}),
   args: {},
   summary: "Send an email",
   reasons: ["approve-external-send"],
