@@ -45,7 +45,7 @@ export function assertSafeId(kind: string, id: string): void {
   if (!SAFE_ID.test(id)) throw new Error(`invalid ${kind} id: ${JSON.stringify(id)}`);
 }
 
-// C0 and C1 controls, bidirectional overrides and line separators: everything that can move the cursor,
+// C0 and C1 controls, bidirectional overrides and line separators: everything that can reposition the caret,
 // recolour the terminal, reorder text or forge a new line.
 const UNSAFE_TERMINAL_CHARS = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
