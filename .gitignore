@@ -4,3 +4,26 @@ coverage
 *.log
 .DS_Store
 .agent-guardrails
+
+# Secret-like files: never commit these. Use .env.example for documented placeholders.
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+.netrc
+/credentials.json
+service-account*.json
+/secrets.json
+/secrets.yml
+/secrets.yaml
+/secrets.toml
+*.tfstate
+*.tfstate.*
