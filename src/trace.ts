@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Clock } from "./clock.js";
 import { Redactor } from "./redact.js";
-import { assertSafeId, isRecord } from "./util.js";
+import { assertSafeId, isRecord, sanitizeText } from "./util.js";
 
 export const TRACE_EVENT_TYPES = [
   "run.start",
@@ -210,7 +210,7 @@ export function renderTimeline(events: TraceEvent[]): string {
   const lines = events.map((e) => {
     const offset = `+${e.ts - t0}ms`.padEnd(8);
     const indent = "  ".repeat(depth(e, parents));
-    return `${offset} ${indent}${describe(e)}`;
+    return sanitizeText(`${offset} ${indent}${describe(e)}`);
   });
   return lines.join("\n");
 }

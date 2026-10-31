@@ -17,3 +17,4 @@ export * from "./eval/scenario.js";
 export * from "./plan.js";
 export * from "./builtin.js";
 export * from "./eval/reviewer.js";
+export { sanitizeText } from "./util.js";

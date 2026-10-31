@@ -1,5 +1,6 @@
 import type { PlanEntry } from "./state.js";
 import { renderDiff } from "./diff.js";
+import { sanitizeText } from "./util.js";
 
 /** Review text for a dry run: what the agent would have changed, in order, and which steps would need a human. */
 export function renderPlan(plan: PlanEntry[]): string {
@@ -13,5 +14,5 @@ export function renderPlan(plan: PlanEntry[]): string {
     lines.push(`   args: ${JSON.stringify(entry.args)}`);
     for (const change of renderDiff(entry.diff)) lines.push(`   diff: ${change}`);
   });
-  return lines.join("\n");
+  return lines.map(sanitizeText).join("\n");
 }

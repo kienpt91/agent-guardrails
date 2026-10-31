@@ -6,7 +6,7 @@ import { ApprovalError, FileApprovalGate, type ApprovalStore } from "./approvals
 import { PolicyEngine, loadPolicyFile } from "./policy.js";
 import { readTraceFile, renderTimeline } from "./trace.js";
 import { SIDE_EFFECTS, type SideEffect } from "./types.js";
-import { errorMessage } from "./util.js";
+import { errorMessage, sanitizeText, truncate } from "./util.js";
 
 export interface CliIo {
   out(text: string): void;
@@ -28,7 +28,9 @@ const USAGE = `agent-guardrails <command>
 
 function describeRequest(entry: Awaited<ReturnType<ApprovalStore["list"]>>[number]): string {
   const { request, decision } = entry;
-  return `${request.id}  ${decision.status.padEnd(8)}  ${request.tool}  run=${request.runId}  ${request.summary}`;
+  return sanitizeText(
+    `${request.id}  ${decision.status.padEnd(8)}  ${request.tool}  run=${request.runId}  ${truncate(request.summary, 200)}`,
+  );
 }
 
 async function approvals(argv: string[], io: CliIo): Promise<number> {
@@ -65,7 +67,7 @@ async function approvals(argv: string[], io: CliIo): Promise<number> {
         return 2;
       }
       const decision = await store.decide(id, action === "approve" ? "approved" : "denied", values.by, values.reason);
-      io.out(`${id} ${decision.status} by ${values.by}\n`);
+      io.out(`${sanitizeText(`${id} ${decision.status} by ${values.by}`)}\n`);
       return 0;
     }
   } catch (err) {

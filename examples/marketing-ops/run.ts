@@ -10,6 +10,7 @@ import {
   renderPlan,
   renderTimeline,
   runWithReviewer,
+  sanitizeText,
   type RunResult,
   type ScriptStep,
 } from "../../src/index.js";
@@ -107,7 +108,7 @@ async function main(): Promise<void> {
   for (const line of out.reviewerLog) console.log(line);
   const { result } = out;
   console.log(`\nStatus: ${result.status}${result.reason ? ` (${result.reason})` : ""}`);
-  if (result.finalMessage) console.log(`Final message: ${result.finalMessage}`);
+  if (result.finalMessage) console.log(`Final message: ${sanitizeText(result.finalMessage)}`);
   console.log(`\n${out.timeline}`);
   if (dryRun) console.log(`\n${out.plan}`);
   console.log(`\nCRM emails sent: ${out.emailsSent}; CMS pages: ${out.pages.join(", ") || "none"}`);
