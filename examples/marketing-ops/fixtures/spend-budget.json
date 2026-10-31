@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "scenario": "spend-budget",
+  "turns": [
+    {
+      "requestDigest": "2e9f50176bb2cc33",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"Northwind\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "825f9d7aa8180174",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "6fe752c8cff6cda6",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_3_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ben@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    }
+  ]
+}

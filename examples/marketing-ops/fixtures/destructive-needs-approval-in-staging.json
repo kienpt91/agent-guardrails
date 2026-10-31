@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "scenario": "destructive-needs-approval-in-staging",
+  "turns": [
+    {
+      "requestDigest": "aad1d077b72f1a2e",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "cms_delete_page",
+            "arguments": "{\"pageId\":\"page_0100\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "5f2a7c6133410869",
+      "response": {
+        "content": "Deleted.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

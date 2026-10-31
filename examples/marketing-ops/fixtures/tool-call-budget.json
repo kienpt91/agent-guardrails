@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "scenario": "tool-call-budget",
+  "turns": [
+    {
+      "requestDigest": "58f1e84ee90edb95",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"N\"}"
+          },
+          {
+            "id": "call_1_2",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"C\"}"
+          },
+          {
+            "id": "call_1_3",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"F\"}"
+          },
+          {
+            "id": "call_1_4",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"G\"}"
+          },
+          {
+            "id": "call_1_5",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"H\"}"
+          },
+          {
+            "id": "call_1_6",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"I\"}"
+          },
+          {
+            "id": "call_1_7",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"J\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    }
+  ]
+}

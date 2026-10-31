@@ -1,0 +1,66 @@
+# Guardrail policy for the marketing-ops example agent.
+#
+# Evaluation is deny-overrides: every matching rule is collected and the strictest effect wins
+# (deny > require_approval > allow). Anything no rule matches falls to `default`.
+version: 1
+default: deny
+
+budgets:
+  maxSteps: 12
+  maxToolCalls: 20
+  maxSpendUnits: 30
+  maxWallClockMs: 60000
+  maxDenials: 4
+
+rules:
+  - id: allow-reads
+    effect: allow
+    match: { sideEffect: read }
+    reason: Reads do not change anything.
+
+  - id: allow-draft-creation
+    effect: allow
+    match: { tool: cms_create_draft }
+    reason: A draft is not public until someone publishes it.
+
+  - id: approve-publish
+    effect: require_approval
+    match: { tool: cms_publish_page }
+    approvalTimeoutMs: 86400000
+    reason: Publishing makes content public.
+
+  - id: approve-external-send
+    effect: require_approval
+    match: { sideEffect: external-send }
+    approvalTimeoutMs: 86400000
+    reason: Email leaves the company.
+
+  - id: deny-bulk-send
+    effect: deny
+    match: { tool: crm_send_email }
+    when:
+      - { path: to, op: count_gt, value: 50 }
+    reason: At most 50 recipients per send; split larger sends by segment.
+
+  - id: deny-large-send-after-untrusted-read
+    effect: deny
+    match: { tool: crm_send_email, tainted: true }
+    when:
+      - { path: to, op: count_gt, value: 5 }
+    reason: After reading free-text CRM content, sends are limited to 5 recipients.
+
+  - id: deny-writes-after-injection
+    effect: deny
+    match: { sideEffect: [write, external-send, destructive], suspectedInjection: true }
+    reason: A tool result looked like an injection attempt; the run is read-only from here. Escalate instead.
+
+  - id: deny-destructive-in-production
+    effect: deny
+    match: { sideEffect: destructive, environment: production }
+    reason: Destructive tools are never allowed in production.
+
+  - id: approve-destructive-elsewhere
+    effect: require_approval
+    match: { sideEffect: destructive }
+    approvalTimeoutMs: 3600000
+    reason: Destructive actions need a human even outside production.

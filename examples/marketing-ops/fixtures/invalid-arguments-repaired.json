@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "scenario": "invalid-arguments-repaired",
+  "turns": [
+    {
+      "requestDigest": "7988328bf10a5520",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":\"ana@northwind.example\",\"subject\":\"Sale\",\"body\":\"Starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "00f70e20d3048976",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\"],\"subject\":\"Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "4530b10d2dfbb5e8",
+      "response": {
+        "content": "Sent.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

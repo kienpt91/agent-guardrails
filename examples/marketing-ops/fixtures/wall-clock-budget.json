@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "scenario": "wall-clock-budget",
+  "turns": [
+    {
+      "requestDigest": "4557a87cd47673e5",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"Northwind\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "48be9ddd01075c54",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"Northwind Outfitters\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    }
+  ]
+}

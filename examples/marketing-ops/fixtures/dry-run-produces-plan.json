@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "scenario": "dry-run-produces-plan",
+  "turns": [
+    {
+      "requestDigest": "88de6748c758a842",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "cms_create_draft",
+            "arguments": "{\"title\":\"Spring Outdoor Sale\",\"body\":\"Spring Outdoor Sale: details to follow.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "f8d7884cb785fe13",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "cms_publish_page",
+            "arguments": "{\"pageId\":\"page_0100\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "ec88e0f6c1bb5d7c",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_3_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "d81069f6cfa6e213",
+      "response": {
+        "content": "Plan prepared.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "scenario": "read-only-lookup",
+  "turns": [
+    {
+      "requestDigest": "1a018f0299f1286a",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"Northwind\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "d005de495b9d91be",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_get_account",
+            "arguments": "{\"accountId\":\"acct_1001\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "134401ad6a2eac4c",
+      "response": {
+        "content": "Northwind Outfitters: Ana Reyes (ana@northwind.example) and Ben Okafor.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

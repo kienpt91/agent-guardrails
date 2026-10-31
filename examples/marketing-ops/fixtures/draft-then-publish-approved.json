@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "scenario": "draft-then-publish-approved",
+  "turns": [
+    {
+      "requestDigest": "d3c19d9204a8d4ef",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "cms_create_draft",
+            "arguments": "{\"title\":\"Spring Outdoor Sale\",\"body\":\"Spring Outdoor Sale: details to follow.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "f4b67ac8202d1a49",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "cms_publish_page",
+            "arguments": "{\"pageId\":\"page_0001\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "c62cbffd15305f60",
+      "response": {
+        "content": "The page is live.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

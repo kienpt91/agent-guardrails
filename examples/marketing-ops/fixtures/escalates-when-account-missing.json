@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "scenario": "escalates-when-account-missing",
+  "turns": [
+    {
+      "requestDigest": "7bdc206af907fa68",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"Globex\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "634dd5f3352046cd",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "escalate_to_human",
+            "arguments": "{\"reason\":\"No Globex account found in the CRM.\",\"summary\":\"I did not guess an address.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    }
+  ]
+}

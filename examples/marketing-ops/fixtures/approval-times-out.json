@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "scenario": "approval-times-out",
+  "turns": [
+    {
+      "requestDigest": "d3c19d9204a8d4ef",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "cms_create_draft",
+            "arguments": "{\"title\":\"Spring Outdoor Sale\",\"body\":\"Spring Outdoor Sale: details to follow.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "f4b67ac8202d1a49",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "cms_publish_page",
+            "arguments": "{\"pageId\":\"page_0001\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "31fb933bacf98ae5",
+      "response": {
+        "content": "Publishing is waiting on review and was not completed.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

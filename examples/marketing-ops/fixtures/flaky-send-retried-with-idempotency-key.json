@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "scenario": "flaky-send-retried-with-idempotency-key",
+  "turns": [
+    {
+      "requestDigest": "7988328bf10a5520",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "2bab6a36ac4c32e5",
+      "response": {
+        "content": "Email sent.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

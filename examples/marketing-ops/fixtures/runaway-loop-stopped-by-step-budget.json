@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "scenario": "runaway-loop-stopped-by-step-budget",
+  "turns": [
+    {
+      "requestDigest": "f9a90d3a552f06af",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"a\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "0c9720e6f9617432",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"a\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "08b5cf993559e58d",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_3_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"a\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "6260e933fef62cbc",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_4_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"a\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "23df8352b740b784",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_5_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"a\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    }
+  ]
+}

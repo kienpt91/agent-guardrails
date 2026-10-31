@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "scenario": "repeated-send-deduplicated",
+  "turns": [
+    {
+      "requestDigest": "7988328bf10a5520",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "253159606bbf11cf",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "61ed9a33a2276dc1",
+      "response": {
+        "content": "Email sent.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

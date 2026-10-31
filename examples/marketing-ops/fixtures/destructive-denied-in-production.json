@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "scenario": "destructive-denied-in-production",
+  "turns": [
+    {
+      "requestDigest": "aad1d077b72f1a2e",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "cms_delete_page",
+            "arguments": "{\"pageId\":\"page_0100\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "4cc2c2f066a5ad34",
+      "response": {
+        "content": "I am not allowed to delete pages in production; please ask an administrator.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

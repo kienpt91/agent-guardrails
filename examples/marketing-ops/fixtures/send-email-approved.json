@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "scenario": "send-email-approved",
+  "turns": [
+    {
+      "requestDigest": "2e541c65abcd315e",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_search_accounts",
+            "arguments": "{\"query\":\"Northwind\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "bf5f8a601b2a3e7d",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "938b5abcbc058c34",
+      "response": {
+        "content": "Email sent to Ana.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}

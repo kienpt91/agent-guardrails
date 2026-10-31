@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "scenario": "bulk-send-denied-then-split",
+  "turns": [
+    {
+      "requestDigest": "755d21749f8167a6",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_1_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"contact01@list.example\",\"contact02@list.example\",\"contact03@list.example\",\"contact04@list.example\",\"contact05@list.example\",\"contact06@list.example\",\"contact07@list.example\",\"contact08@list.example\",\"contact09@list.example\",\"contact10@list.example\",\"contact11@list.example\",\"contact12@list.example\",\"contact13@list.example\",\"contact14@list.example\",\"contact15@list.example\",\"contact16@list.example\",\"contact17@list.example\",\"contact18@list.example\",\"contact19@list.example\",\"contact20@list.example\",\"contact21@list.example\",\"contact22@list.example\",\"contact23@list.example\",\"contact24@list.example\",\"contact25@list.example\",\"contact26@list.example\",\"contact27@list.example\",\"contact28@list.example\",\"contact29@list.example\",\"contact30@list.example\",\"contact31@list.example\",\"contact32@list.example\",\"contact33@list.example\",\"contact34@list.example\",\"contact35@list.example\",\"contact36@list.example\",\"contact37@list.example\",\"contact38@list.example\",\"contact39@list.example\",\"contact40@list.example\",\"contact41@list.example\",\"contact42@list.example\",\"contact43@list.example\",\"contact44@list.example\",\"contact45@list.example\",\"contact46@list.example\",\"contact47@list.example\",\"contact48@list.example\",\"contact49@list.example\",\"contact50@list.example\",\"contact51@list.example\",\"contact52@list.example\",\"contact53@list.example\",\"contact54@list.example\",\"contact55@list.example\",\"contact56@list.example\",\"contact57@list.example\",\"contact58@list.example\",\"contact59@list.example\",\"contact60@list.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "36586e1a9417f7cd",
+      "response": {
+        "content": null,
+        "toolCalls": [
+          {
+            "id": "call_2_1",
+            "name": "crm_send_email",
+            "arguments": "{\"to\":[\"ana@northwind.example\",\"ben@northwind.example\"],\"subject\":\"Spring Outdoor Sale\",\"body\":\"Our spring sale starts today.\"}"
+          }
+        ],
+        "costUnits": 1
+      }
+    },
+    {
+      "requestDigest": "77dbad48c04b2ede",
+      "response": {
+        "content": "Sent to the Northwind contacts; the full 60-recipient send needs to be split by segment.",
+        "toolCalls": [],
+        "costUnits": 1
+      }
+    }
+  ]
+}
