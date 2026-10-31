@@ -1,0 +1,38 @@
+{
+  "name": "agent-guardrails",
+  "version": "0.1.0",
+  "description": "Library for running tool-using agents with enforceable guardrails: typed tools, declarative policy, human approvals, dry-run, tracing and an offline eval harness.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Kien Phan",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "agent-guardrails": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "cli": "tsx src/cli.ts",
+    "example": "tsx examples/marketing-ops/run.ts",
+    "eval": "tsx examples/marketing-ops/eval.ts",
+    "eval:record": "tsx examples/marketing-ops/eval.ts --record"
+  },
+  "dependencies": {
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
