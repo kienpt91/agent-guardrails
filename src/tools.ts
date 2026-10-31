@@ -82,7 +82,7 @@ export interface ToolDefinition<I extends z.ZodType, O extends z.ZodType> {
   retry?: { maxAttempts: number; backoffMs?: number };
   trust?: "trusted" | "untrusted";
   costUnits?: number | ((input: z.output<I>) => number);
-  /** Always permitted, never needs approval (use for "hand over to a human"). */
+  /** Bypasses policy and approval. Only for tools that end the run (`endsRun`) and are not destructive or external-send. */
   safeExit?: boolean;
   endsRun?: "escalated";
   simulate?(input: z.output<I>, ctx: ToolContext): Promise<Simulation> | Simulation;
@@ -106,6 +106,12 @@ export function defineTool<I extends z.ZodType, O extends z.ZodType>(def: ToolDe
   }
   if (def.idempotencyKey && idempotency !== "key") {
     throw new Error(`${def.name}: idempotencyKey requires idempotency: "key"`);
+  }
+  if (def.safeExit && !def.endsRun) {
+    throw new Error(`${def.name}: a safeExit tool must declare endsRun, because it bypasses policy and exists only to stop the run`);
+  }
+  if (def.safeExit && (def.sideEffect === "destructive" || def.sideEffect === "external-send")) {
+    throw new Error(`${def.name}: safeExit is not allowed on ${def.sideEffect} tools`);
   }
   const timeoutMs = def.timeoutMs ?? 10_000;
   if (!(timeoutMs > 0)) throw new Error(`${def.name}: timeoutMs must be positive`);

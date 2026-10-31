@@ -4,8 +4,9 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
 import { systemClock, type Clock } from "./clock.js";
-import type { SideEffect } from "./types.js";
-import { assertSafeId, errorMessage, isRecord, sha256Hex } from "./util.js";
+import { SIDE_EFFECTS, type SideEffect } from "./types.js";
+import { LockError, acquireFileLock } from "./lock.js";
+import { assertSafeId, canonicalJson, errorMessage, sha256Hex } from "./util.js";
 
 export interface ApprovalRequest {
   id: string;
@@ -13,6 +14,8 @@ export interface ApprovalRequest {
   toolCallId: string;
   tool: string;
   sideEffect: SideEffect;
+  /** `callDigest` of the run, call, tool and the exact (unredacted) arguments this approval is for. */
+  digest: string;
   /** Arguments as shown to the reviewer (secret fields redacted). */
   args: unknown;
   summary: string;
@@ -27,6 +30,8 @@ export type ApprovalStatus = "pending" | "approved" | "denied" | "expired";
 
 export interface ApprovalDecision {
   status: ApprovalStatus;
+  /** Digest stored in the request record this decision belongs to. The runner compares it with the call it is about to execute. */
+  requestDigest: string;
   decidedBy?: string;
   reason?: string;
   decidedAt?: number;
@@ -48,13 +53,14 @@ export interface ApprovalGate {
 }
 
 export interface ApprovalStore extends ApprovalGate {
-  decide(id: string, decision: "approved" | "denied", decidedBy: string, reason?: string): Promise<ApprovalDecision>;
-  list(): Promise<{ request: ApprovalRequest; decision: ApprovalDecision }[]>;
+  /** When `digest` is given it must equal the stored request's digest, or the decision is rejected. */
+  decide(id: string, decision: "approved" | "denied", decidedBy: string, reason?: string, digest?: string): Promise<ApprovalDecision>;
+  list(): Promise<ApprovalListing[]>;
 }
 
 export class ApprovalError extends Error {
   constructor(
-    readonly code: "not_found" | "already_decided" | "expired" | "invalid",
+    readonly code: "not_found" | "already_decided" | "expired" | "invalid" | "digest_mismatch" | "busy",
     message: string,
   ) {
     super(message);
@@ -67,18 +73,35 @@ export function approvalIdFor(runId: string, toolCallId: string): string {
   return `apr_${sha256Hex(`${runId}\n${toolCallId}`).slice(0, 16)}`;
 }
 
+/**
+ * Digest of exactly what an approval authorises: run, call id, tool and the canonical JSON of the
+ * unredacted arguments. An approval record whose digest differs from the call about to run is not valid for it.
+ */
+export function callDigest(runId: string, toolCallId: string, tool: string, args: unknown): string {
+  return sha256Hex(canonicalJson({ runId, toolCallId, tool, args }));
+}
+
 /** Applies expiry: a still-pending request past `expiresAt` counts as expired. */
 export function effectiveStatus(request: ApprovalRequest, decision: ApprovalDecision, now: number): ApprovalDecision {
   if (decision.status === "pending" && request.expiresAt !== undefined && now >= request.expiresAt) {
-    return { status: "expired", reason: "no decision before the approval timeout" };
+    return { status: "expired", requestDigest: decision.requestDigest, reason: "no decision before the approval timeout" };
   }
   return decision;
 }
 
+type StoredDecision = Omit<ApprovalDecision, "requestDigest">;
+
 interface Entry {
+  request: ApprovalRequest;
+  decision: StoredDecision;
+}
+
+export interface ApprovalListing {
   request: ApprovalRequest;
   decision: ApprovalDecision;
 }
+
+const view = (entry: Entry): ApprovalDecision => ({ ...entry.decision, requestDigest: entry.request.digest });
 
 function applyDecision(
   entry: Entry,
@@ -86,7 +109,11 @@ function applyDecision(
   decidedBy: string,
   reason: string | undefined,
   now: number,
+  digest: string | undefined,
 ): ApprovalDecision {
+  if (digest !== undefined && digest !== entry.request.digest) {
+    throw new ApprovalError("digest_mismatch", `approval ${entry.request.id} was issued for a different call than the one this decision names`);
+  }
   if (entry.decision.status !== "pending") {
     throw new ApprovalError("already_decided", `approval ${entry.request.id} is already ${entry.decision.status}`);
   }
@@ -95,7 +122,17 @@ function applyDecision(
   }
   if (decidedBy.trim() === "") throw new ApprovalError("invalid", "decidedBy is required");
   entry.decision = { status: decision, decidedBy, ...(reason ? { reason } : {}), decidedAt: now };
-  return entry.decision;
+  return view(entry);
+}
+
+/** What `request()` reports when a record for the same id already exists. */
+function reuseOrReplace(existing: Entry | undefined, request: ApprovalRequest): { entry: Entry; detail: string } {
+  if (!existing) return { entry: { request, decision: { status: "pending" } }, detail: "recorded" };
+  if (existing.request.digest === request.digest) return { entry: existing, detail: "record already exists for this exact call" };
+  return {
+    entry: { request, decision: { status: "pending" } },
+    detail: "replaced a stale record that was issued for a different call; its decision was discarded",
+  };
 }
 
 export class InMemoryApprovalGate implements ApprovalStore {
@@ -103,29 +140,45 @@ export class InMemoryApprovalGate implements ApprovalStore {
   constructor(private readonly clock: Clock = systemClock) {}
 
   async request(request: ApprovalRequest): Promise<RequestOutcome> {
-    if (!this.entries.has(request.id)) this.entries.set(request.id, { request, decision: { status: "pending" } });
-    return { notified: false, detail: "held in memory" };
+    const { entry, detail } = reuseOrReplace(this.entries.get(request.id), request);
+    this.entries.set(request.id, entry);
+    return { notified: false, detail: `held in memory; ${detail}` };
   }
 
   async status(id: string): Promise<ApprovalDecision> {
     const entry = this.entries.get(id);
     if (!entry) throw new ApprovalError("not_found", `unknown approval ${id}`);
-    return entry.decision;
+    return view(entry);
   }
 
-  async decide(id: string, decision: "approved" | "denied", decidedBy: string, reason?: string): Promise<ApprovalDecision> {
+  async decide(id: string, decision: "approved" | "denied", decidedBy: string, reason?: string, digest?: string): Promise<ApprovalDecision> {
     const entry = this.entries.get(id);
     if (!entry) throw new ApprovalError("not_found", `unknown approval ${id}`);
-    return applyDecision(entry, decision, decidedBy, reason, this.clock.now());
+    return applyDecision(entry, decision, decidedBy, reason, this.clock.now(), digest);
   }
 
-  async list(): Promise<Entry[]> {
-    return [...this.entries.values()];
+  async list(): Promise<ApprovalListing[]> {
+    return [...this.entries.values()].map((e) => ({ request: e.request, decision: view(e) }));
   }
 }
 
+export const ApprovalRequestSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  toolCallId: z.string(),
+  tool: z.string(),
+  sideEffect: z.enum(SIDE_EFFECTS),
+  digest: z.string().regex(/^[0-9a-f]{64}$/),
+  args: z.unknown(),
+  summary: z.string(),
+  reasons: z.array(z.string()),
+  context: z.object({ environment: z.string(), tainted: z.boolean(), suspectedInjection: z.boolean() }),
+  requestedAt: z.number(),
+  expiresAt: z.number().optional(),
+});
+
 const EntrySchema = z.object({
-  request: z.custom<ApprovalRequest>((v) => isRecord(v) && typeof v["id"] === "string"),
+  request: ApprovalRequestSchema,
   decision: z.object({
     status: z.enum(["pending", "approved", "denied", "expired"]),
     decidedBy: z.string().optional(),
@@ -134,9 +187,13 @@ const EntrySchema = z.object({
   }),
 });
 
+const LOCK_TTL_MS = 10_000;
+
 /**
  * One JSON file per request under `dir`. Because the files outlive the process, a run can pause,
  * the process can exit, and a reviewer can decide from another process (see the `approvals` CLI).
+ * Writes to one record are serialised with an advisory lock file, so a concurrent approve and
+ * deny cannot overwrite each other.
  */
 export class FileApprovalGate implements ApprovalStore {
   constructor(
@@ -169,30 +226,57 @@ export class FileApprovalGate implements ApprovalStore {
     renameSync(tmp, file);
   }
 
-  async request(request: ApprovalRequest): Promise<RequestOutcome> {
-    try {
-      this.read(request.id);
-    } catch (err) {
-      if (!(err instanceof ApprovalError)) throw err;
-      this.write({ request, decision: { status: "pending" } });
+  private async locked<T>(id: string, fn: () => T): Promise<T> {
+    const lockPath = `${this.pathFor(id)}.lock`;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const lock = acquireFileLock(lockPath, LOCK_TTL_MS);
+        try {
+          return fn();
+        } finally {
+          lock.release();
+        }
+      } catch (err) {
+        if (!(err instanceof LockError)) throw err;
+        if (attempt >= 50) throw new ApprovalError("busy", `approval ${id} is being updated by another process`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
     }
-    return { notified: false, detail: "written to the file approval store" };
+  }
+
+  async request(request: ApprovalRequest): Promise<RequestOutcome> {
+    return this.locked(request.id, () => {
+      let existing: Entry | undefined;
+      try {
+        existing = this.read(request.id);
+      } catch (err) {
+        if (!(err instanceof ApprovalError)) throw err;
+      }
+      const { entry, detail } = reuseOrReplace(existing, request);
+      if (entry !== existing) this.write(entry);
+      return { notified: false, detail: `written to the file approval store; ${detail}` };
+    });
   }
 
   async status(id: string): Promise<ApprovalDecision> {
-    return this.read(id).decision;
+    return view(this.read(id));
   }
 
-  async decide(id: string, decision: "approved" | "denied", decidedBy: string, reason?: string): Promise<ApprovalDecision> {
-    const entry = this.read(id);
-    const result = applyDecision(entry, decision, decidedBy, reason, this.clock.now());
-    this.write(entry);
-    return result;
+  async decide(id: string, decision: "approved" | "denied", decidedBy: string, reason?: string, digest?: string): Promise<ApprovalDecision> {
+    return this.locked(id, () => {
+      const entry = this.read(id);
+      const result = applyDecision(entry, decision, decidedBy, reason, this.clock.now(), digest);
+      this.write(entry);
+      return result;
+    });
   }
 
-  async list(): Promise<Entry[]> {
+  async list(): Promise<ApprovalListing[]> {
     const files = readdirSync(this.dir).filter((f) => f.endsWith(".json")).sort();
-    return files.map((f) => this.read(f.slice(0, -".json".length)));
+    return files.map((f) => {
+      const entry = this.read(f.slice(0, -".json".length));
+      return { request: entry.request, decision: view(entry) };
+    });
   }
 }
 
@@ -206,12 +290,22 @@ export interface HttpCallbackOptions {
   fetch?: typeof fetch;
   /** Included in the notification so the receiver knows where to send the decision. */
   callbackBaseUrl?: string;
+  /** How far a decision's timestamp may differ from this process's clock. Default 5 minutes. */
+  freshnessWindowMs?: number;
+  clock?: Clock;
 }
 
 export const SIGNATURE_HEADER = "x-guardrails-signature";
+export const TIMESTAMP_HEADER = "x-guardrails-timestamp";
+export const DIGEST_HEADER = "x-guardrails-digest";
 
 export function sign(secret: string, payload: string): string {
   return `sha256=${createHmac("sha256", secret).update(payload).digest("hex")}`;
+}
+
+/** Signature a reviewer's system must send with a decision. Covers the approval id, the call digest, the timestamp and the exact body. */
+export function signDecision(secret: string, parts: { id: string; digest: string; timestamp: number | string; body: string }): string {
+  return sign(secret, `${parts.id}.${parts.digest}.${parts.timestamp}.${parts.body}`);
 }
 
 function signaturesMatch(expected: string, received: string): boolean {
@@ -231,17 +325,33 @@ export interface CallbackResponse {
   body: Record<string, unknown>;
 }
 
+export interface CallbackAuth {
+  signature: string | undefined;
+  /** Milliseconds since the epoch, as sent in `x-guardrails-timestamp`. */
+  timestamp: string | undefined;
+  /** The call digest the decision is for, as sent in `x-guardrails-digest`. */
+  digest: string | undefined;
+}
+
 /**
  * Approvals decided over HTTP. `request` persists the request and POSTs a signed notification;
  * the reviewer's system answers by POSTing a signed decision to `handleCallback` (or the server
  * from `createCallbackServer`). The decision is stored, so the run can be resumed in any process.
+ *
+ * A decision is accepted only if its signature covers the approval id, the digest of the call it
+ * approves, a timestamp within the freshness window and the body; the digest must also equal the
+ * one stored with the request, and a request can be decided once.
  */
 export class HttpCallbackApprovalGate implements ApprovalGate {
   private readonly fetchFn: typeof fetch;
+  private readonly clock: Clock;
+  private readonly windowMs: number;
 
   constructor(private readonly options: HttpCallbackOptions) {
     if (options.secret.length < 16) throw new Error("approval callback secret must be at least 16 characters");
     this.fetchFn = options.fetch ?? fetch;
+    this.clock = options.clock ?? systemClock;
+    this.windowMs = options.freshnessWindowMs ?? 5 * 60_000;
   }
 
   async request(request: ApprovalRequest): Promise<RequestOutcome> {
@@ -253,10 +363,15 @@ export class HttpCallbackApprovalGate implements ApprovalGate {
         ? { callbackUrl: `${this.options.callbackBaseUrl.replace(/\/$/, "")}/approvals/${request.id}` }
         : {}),
     });
+    const timestamp = String(this.clock.now());
     try {
       const res = await this.fetchFn(this.options.notifyUrl, {
         method: "POST",
-        headers: { "content-type": "application/json", [SIGNATURE_HEADER]: sign(this.options.secret, body) },
+        headers: {
+          "content-type": "application/json",
+          [TIMESTAMP_HEADER]: timestamp,
+          [SIGNATURE_HEADER]: sign(this.options.secret, `${timestamp}.${body}`),
+        },
         body,
       });
       if (!res.ok) return { notified: false, detail: `notify endpoint answered HTTP ${res.status}; request is still pending` };
@@ -270,10 +385,15 @@ export class HttpCallbackApprovalGate implements ApprovalGate {
     return this.options.store.status(id);
   }
 
-  /** Verifies the signature over `${id}.${rawBody}` and records the decision. */
-  async handleCallback(id: string, rawBody: string, signature: string | undefined): Promise<CallbackResponse> {
-    if (!signature || !signaturesMatch(sign(this.options.secret, `${id}.${rawBody}`), signature)) {
+  async handleCallback(id: string, rawBody: string, auth: CallbackAuth): Promise<CallbackResponse> {
+    const { signature, timestamp, digest } = auth;
+    if (!signature || !timestamp || !digest) return { status: 401, body: { error: "missing signature, timestamp or digest" } };
+    if (!signaturesMatch(signDecision(this.options.secret, { id, digest, timestamp, body: rawBody }), signature)) {
       return { status: 401, body: { error: "invalid signature" } };
+    }
+    const sentAt = Number(timestamp);
+    if (!Number.isFinite(sentAt) || Math.abs(this.clock.now() - sentAt) > this.windowMs) {
+      return { status: 401, body: { error: "timestamp outside the freshness window" } };
     }
     let json: unknown;
     try {
@@ -284,7 +404,7 @@ export class HttpCallbackApprovalGate implements ApprovalGate {
     const parsed = DecisionBody.safeParse(json);
     if (!parsed.success) return { status: 400, body: { error: "body must be {decision, decidedBy, reason?}" } };
     try {
-      const decision = await this.options.store.decide(id, parsed.data.decision, parsed.data.decidedBy, parsed.data.reason);
+      const decision = await this.options.store.decide(id, parsed.data.decision, parsed.data.decidedBy, parsed.data.reason, digest);
       return { status: 200, body: { id, status: decision.status } };
     } catch (err) {
       if (err instanceof ApprovalError) {
@@ -321,8 +441,15 @@ export function createCallbackServer(gate: HttpCallbackApprovalGate): Server {
       if (req.method !== "POST" || !match) return send(404, { error: "not found" });
       const raw = await readBody(req);
       if (raw === undefined) return send(413, { error: "body too large" });
-      const header = req.headers[SIGNATURE_HEADER];
-      const result = await gate.handleCallback(match[1]!, raw, Array.isArray(header) ? header[0] : header);
+      const header = (name: string) => {
+        const value = req.headers[name];
+        return Array.isArray(value) ? value[0] : value;
+      };
+      const result = await gate.handleCallback(match[1]!, raw, {
+        signature: header(SIGNATURE_HEADER),
+        timestamp: header(TIMESTAMP_HEADER),
+        digest: header(DIGEST_HEADER),
+      });
       return send(result.status, result.body);
     } catch {
       return send(500, { error: "internal error" });

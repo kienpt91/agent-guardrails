@@ -1,9 +1,17 @@
-import { ApprovalError, approvalIdFor, effectiveStatus, type ApprovalGate, type ApprovalRequest } from "./approvals.js";
+import {
+  ApprovalError,
+  approvalIdFor,
+  callDigest,
+  effectiveStatus,
+  type ApprovalDecision,
+  type ApprovalGate,
+  type ApprovalRequest,
+} from "./approvals.js";
 import { systemClock, type Clock } from "./clock.js";
 import { detectInjection, type InjectionDetector } from "./injection.js";
 import { BudgetGuard, PolicyEngine, type BudgetViolation, type Policy, type PolicyDecision } from "./policy.js";
 import { Redactor, type RedactionConfig } from "./redact.js";
-import { MemoryRunStore, deriveRunId, type PlanEntry, type RunState, type RunStore } from "./state.js";
+import { MemoryRunStore, deriveRunId, type PlanEntry, type RunLock, type RunState, type RunStore } from "./state.js";
 import { Tracer, MemoryTraceSink, type TraceEventType, type TraceSink } from "./trace.js";
 import { ToolRegistry, parseArguments, type Simulation, type Tool, type ToolContext, ToolError } from "./tools.js";
 import { ModelError, TERMINAL_STATUSES, type ModelAdapter, type RunStatus, type ToolCallRequest } from "./types.js";
@@ -56,6 +64,7 @@ export interface RunResult {
 }
 
 interface Execution {
+  lock?: RunLock;
   state: RunState;
   tracer: Tracer;
   segmentStart: number;
@@ -107,6 +116,15 @@ export class Agent {
 
   async run(input: RunInput): Promise<RunResult> {
     const runId = input.runId ?? deriveRunId(this.config.name, input.task, input.salt);
+    const lock = await this.store.lock?.(runId);
+    try {
+      return await this.start(runId, input, lock);
+    } finally {
+      lock?.release();
+    }
+  }
+
+  private async start(runId: string, input: RunInput, lock: RunLock | undefined): Promise<RunResult> {
     const existing = await this.store.load(runId);
     if (existing) {
       throw new Error(`run ${runId} already exists (status ${existing.status}); use resume(), or pass a different salt`);
@@ -132,7 +150,7 @@ export class Agent {
       spans: { run: `${runId}.0` },
       plan: [],
     };
-    const ex = this.begin(state);
+    const ex = this.begin(state, lock);
     this.emit(ex, "run.start", state.spans.run, undefined, {
       agent: state.agent,
       environment: state.environment,
@@ -146,16 +164,27 @@ export class Agent {
 
   /** Continues a paused run (or one that was interrupted mid-flight) from its saved state. */
   async resume(runId: string): Promise<RunResult> {
-    const state = await this.store.load(runId);
-    if (!state) throw new Error(`no saved state for run ${runId}`);
-    if (state.agent !== this.config.name) {
-      throw new Error(`run ${runId} belongs to agent ${state.agent}, not ${this.config.name}`);
+    const lock = await this.store.lock?.(runId);
+    try {
+      const state = await this.store.load(runId);
+      if (!state) throw new Error(`no saved state for run ${runId}`);
+      if (state.agent !== this.config.name) {
+        throw new Error(`run ${runId} belongs to agent ${state.agent}, not ${this.config.name}`);
+      }
+      if (TERMINAL_STATUSES.includes(state.status)) return this.result(state);
+      const environment = this.config.environment ?? "development";
+      if (state.environment !== environment) {
+        throw new Error(`run ${runId} was started in environment "${state.environment}" but this agent is configured for "${environment}"`);
+      }
+      // The stricter mode wins: an agent configured for dry-run never executes a persisted real run.
+      if (this.config.dryRun) state.dryRun = true;
+      const ex = this.begin(state, lock);
+      this.emit(ex, "run.resume", state.spans.run, undefined, { previousStatus: state.status });
+      state.status = "running";
+      return await this.drive(ex);
+    } finally {
+      lock?.release();
     }
-    if (TERMINAL_STATUSES.includes(state.status)) return this.result(state);
-    const ex = this.begin(state);
-    this.emit(ex, "run.resume", state.spans.run, undefined, { previousStatus: state.status });
-    state.status = "running";
-    return this.drive(ex);
   }
 
   /** Loads the saved result of a run without running anything. */
@@ -164,8 +193,9 @@ export class Agent {
     return state ? this.result(state) : undefined;
   }
 
-  private begin(state: RunState): Execution {
+  private begin(state: RunState, lock?: RunLock): Execution {
     return {
+      ...(lock ? { lock } : {}),
       state,
       tracer: new Tracer(state.runId, this.sink, this.clock, this.redactor, state.counters),
       segmentStart: this.clock.now(),
@@ -185,6 +215,7 @@ export class Agent {
 
   private async checkpoint(ex: Execution): Promise<void> {
     this.touch(ex);
+    ex.lock?.refresh();
     await this.store.save(ex.state);
   }
 
@@ -318,8 +349,8 @@ export class Agent {
     delete state.awaiting;
   }
 
-  private errorContent(code: string, message: string, extra: Record<string, unknown> = {}): string {
-    return json({ ok: false, error: { code, message, ...extra } });
+  private errorContent(code: string, message: string, extra: Record<string, unknown> = {}, envelope: Record<string, unknown> = {}): string {
+    return json({ ok: false, ...envelope, error: { code, message, ...extra } });
   }
 
   private resultEvent(
@@ -362,7 +393,7 @@ export class Agent {
     let key: string;
     if (resuming) {
       args = state.awaiting!.args;
-      key = state.awaiting!.idempotencyKey;
+      key = tool.idempotencyKeyFor(state.runId, args);
     } else {
       const parsed = parseArguments(tool, call.arguments);
       this.emit(ex, "tool.call", span, stepSpan, {
@@ -442,6 +473,7 @@ export class Agent {
           toolCallId: call.id,
           tool: tool.name,
           sideEffect: tool.sideEffect,
+          digest: callDigest(state.runId, call.id, tool.name, args),
           args: this.redactor.redact(args),
           summary: tool.describe ? tool.describe(args) : `${tool.name} (${tool.sideEffect})`,
           reasons: decision.matched.filter((m) => m.effect === "require_approval").map((m) => m.id).concat(
@@ -463,12 +495,18 @@ export class Agent {
         });
         if (outcome) this.emit(ex, "approval.notify", span, stepSpan, { notified: outcome.notified, detail: outcome.detail ?? "" });
       }
-      let status;
+      // What is about to run, recomputed from the arguments held here. The approval must have been issued for exactly this.
+      const digest = callDigest(state.runId, call.id, tool.name, args);
+      let status: ApprovalDecision;
       try {
-        status = effectiveStatus(request, await gate.status(request.id), this.clock.now());
+        const stored = await gate.status(request.id);
+        status =
+          request.digest !== digest || stored.requestDigest !== digest
+            ? { status: "denied", requestDigest: digest, reason: "approval record does not match the call that is about to run" }
+            : effectiveStatus(request, stored, this.clock.now());
       } catch (err) {
         if (err instanceof ApprovalError && err.code === "not_found") {
-          status = { status: "denied" as const, reason: "approval record is missing" };
+          status = { status: "denied", requestDigest: digest, reason: "approval record is missing" };
         } else {
           throw err;
         }
@@ -508,10 +546,10 @@ export class Agent {
       await this.endBudget(ex, unaffordable);
       return "ended";
     }
-    state.usage.spendUnits += cost;
     const started = this.clock.now();
     const outcome = await this.execute(ex, tool, call, args, key, span);
     const durationMs = this.clock.now() - started;
+    const charged = cost * outcome.attempts;
 
     if (!outcome.ok) {
       this.resultEvent(ex, span, {
@@ -521,16 +559,28 @@ export class Agent {
         errorCode: outcome.code,
         durationMs,
         attempts: outcome.attempts,
-        cost,
+        cost: charged,
       });
-      const flagged = this.scan(ex, tool, outcome.message, span);
+      // Error text and details can carry third-party content (an upstream error body), so they are tainted and scanned like results.
+      if (tool.trust === "untrusted") state.flags.tainted = true;
+      const flagged = this.scan(
+        ex,
+        tool,
+        outcome.details !== undefined ? `${outcome.message}\n${canonicalJson(outcome.details)}` : outcome.message,
+        span,
+      );
       this.finishCall(
         ex,
         call,
-        this.errorContent(outcome.code, outcome.message, {
-          ...(outcome.details !== undefined ? { details: outcome.details } : {}),
-          ...(flagged ? { securityNote: SECURITY_NOTE } : {}),
-        }),
+        this.errorContent(
+          outcome.code,
+          outcome.message,
+          {
+            ...(outcome.details !== undefined ? { details: outcome.details } : {}),
+            ...(flagged ? { securityNote: SECURITY_NOTE } : {}),
+          },
+          tool.trust === "untrusted" ? { untrusted: true } : {},
+        ),
       );
       return "next";
     }
@@ -544,7 +594,7 @@ export class Agent {
       executed: true,
       durationMs,
       attempts: outcome.attempts,
-      cost,
+      cost: charged,
       preview: outcome.value,
     });
     this.finishCall(ex, call, this.successContent(tool, outcome.value, flagged));
@@ -674,8 +724,11 @@ export class Agent {
     key: string,
     span: string,
   ): Promise<ExecOk | ExecFail> {
+    const { state } = ex;
     const max = tool.retry.maxAttempts;
+    const cost = tool.costUnits(args);
     for (let attempt = 1; ; attempt++) {
+      state.usage.spendUnits += cost;
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
@@ -708,6 +761,11 @@ export class Agent {
             : { ok: false, code: "tool_failed", message: truncate(errorMessage(err), 300), attempts: attempt };
         const retryable = err instanceof ToolError && err.retryable;
         if (!retryable || attempt >= max) return failure;
+        // Every backend attempt costs money, so a retry must fit in the spend budget too.
+        this.touch(ex);
+        if (this.guard.beforeExecute(state.usage, cost)) {
+          return { ...failure, message: `${failure.message} (not retried: spend budget)` };
+        }
         this.emit(ex, "tool.retry", span, ex.state.spans.step, { tool: tool.name, attempt: attempt + 1, errorCode: failure.code, idempotencyKey: key });
         await this.clock.sleep(tool.retry.backoffMs * attempt);
       } finally {
