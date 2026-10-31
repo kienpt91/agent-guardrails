@@ -102,7 +102,7 @@ describe("run stores", () => {
 });
 
 describe("Redactor", () => {
-  const r = new Redactor({ fields: ["ssn"], patterns: ["sk_test_[A-Za-z0-9]+"] });
+  const r = new Redactor({ fields: ["ssn"], patterns: ["demo_key_[A-Za-z0-9]+"] });
 
   it("redacts default secret fields at any depth, case- and separator-insensitively", () => {
     const out = r.redact({ user: "a", Password: "p", nested: { API_KEY: "k", list: [{ authorization: "Bearer x" }] } });
@@ -118,8 +118,8 @@ describe("Redactor", () => {
   });
 
   it("replaces configured patterns inside string values", () => {
-    expect(r.redact({ note: "key is sk_test_abc123 ok" })).toEqual({ note: `key is ${REDACTED} ok` });
-    expect(r.redactString("sk_test_a and sk_test_b")).toBe(`${REDACTED} and ${REDACTED}`);
+    expect(r.redact({ note: "key is demo_key_abc123 ok" })).toEqual({ note: `key is ${REDACTED} ok` });
+    expect(r.redactString("demo_key_a and demo_key_b")).toBe(`${REDACTED} and ${REDACTED}`);
   });
 
   it("returns a copy and leaves the input untouched", () => {
